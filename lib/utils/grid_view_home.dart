@@ -96,6 +96,8 @@ print(snapshot.data!.length);
                               //   schedule['fare'] ?? 'N/A',
                               //   style: GoogleFonts.poppins(),
                               // ),
+
+                            
                             ],
                           ),
                         ),
