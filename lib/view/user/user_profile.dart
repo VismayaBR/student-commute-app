@@ -1,6 +1,7 @@
-import 'dart:io';
-
+import 'dart:typed_data';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:iconsax/iconsax.dart';
@@ -27,7 +28,9 @@ class _UserProfileState extends State<UserProfile> {
   String email = 'Not Available';
   String phone = 'Not Available';
   String id = '';
-  File? _profileImage;
+  Uint8List? _profileImage;
+  String profileImageUrl = '';
+  final ImagePicker _picker = ImagePicker();
 
   Future<void> getData() async {
     try {
@@ -37,6 +40,7 @@ class _UserProfileState extends State<UserProfile> {
         name = spref.getString('name') ?? 'Guest';
         email = spref.getString('email') ?? 'Not Available';
         phone = spref.getString('phone') ?? 'Not Available';
+        profileImageUrl = spref.getString('profile_image_url') ?? '';
       });
     } catch (e) {
       // Handle error
@@ -45,13 +49,37 @@ class _UserProfileState extends State<UserProfile> {
   }
 
   Future<void> _pickImage() async {
-    final ImagePicker picker = ImagePicker();
-    final XFile? pickedFile = await picker.pickImage(source: ImageSource.gallery);
+    try {
+      final pickedFile = await _picker.pickImage(source: ImageSource.gallery);
+      if (pickedFile != null) {
+        var imageFile = await pickedFile.readAsBytes();  // Adjusted for web compatibility
+        String fileName = 'images/${DateTime.now().millisecondsSinceEpoch}.jpg';
+        Reference storageRef = FirebaseStorage.instance.ref().child(fileName);
+        UploadTask uploadTask = storageRef.putData(imageFile);  // Adjusted for web compatibility
+        TaskSnapshot snapshot = await uploadTask;
+        String imageUrl = await snapshot.ref.getDownloadURL();
 
-    if (pickedFile != null) {
-      setState(() {
-        _profileImage = File(pickedFile.path);
-      });
+        setState(() {
+          _profileImage = imageFile;  // Use this in CircleAvatar
+          profileImageUrl = imageUrl;
+        });
+      }
+    } catch (e) {
+      print('Error picking image: $e');
+    }
+  }
+
+  Future<void> _saveDataToFirestore() async {
+    try {
+      CollectionReference users = FirebaseFirestore.instance.collection('users');
+      await users.doc(id).set({
+        'name': name,
+        'email': email,
+        'phone': phone,
+        'profile_image_url': profileImageUrl,
+      }, SetOptions(merge: true));
+    } catch (e) {
+      print('Error saving data to Firestore: $e');
     }
   }
 
@@ -80,8 +108,10 @@ class _UserProfileState extends State<UserProfile> {
                   child: CircleAvatar(
                     radius: 40,
                     backgroundImage: _profileImage != null
-                        ? FileImage(_profileImage!)
-                        : AssetImage('assets/default_avatar.png') as ImageProvider,
+                        ? MemoryImage(_profileImage!)
+                        : (profileImageUrl.isNotEmpty
+                            ? NetworkImage(profileImageUrl)
+                            : AssetImage('assets/default_avatar.png')) as ImageProvider,
                     child: _profileImage == null
                         ? Icon(
                             Iconsax.camera,
@@ -115,12 +145,18 @@ class _UserProfileState extends State<UserProfile> {
               child: Text('Cancel'),
             ),
             ElevatedButton(
-              onPressed: () {
+              onPressed: () async {
                 setState(() {
                   name = nameController.text;
                   email = emailController.text;
                   phone = phoneController.text;
                 });
+                await _saveDataToFirestore();
+                SharedPreferences spref = await SharedPreferences.getInstance();
+                spref.setString('name', name);
+                spref.setString('email', email);
+                spref.setString('phone', phone);
+                spref.setString('profile_image_url', profileImageUrl);
                 Navigator.of(context).pop();
               },
               child: Text('Save'),
@@ -162,8 +198,10 @@ class _UserProfileState extends State<UserProfile> {
                     CircleAvatar(
                       radius: 30,
                       backgroundImage: _profileImage != null
-                          ? FileImage(_profileImage!)
-                          : AssetImage('assets/default_avatar.png') as ImageProvider,
+                          ? MemoryImage(_profileImage!)
+                          : (profileImageUrl.isNotEmpty
+                              ? NetworkImage(profileImageUrl)
+                              : AssetImage('assets/default_avatar.png')) as ImageProvider,
                     ),
                     SizedBox(width: 10), // Added spacing for better alignment
                     IconButton(
